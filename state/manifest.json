@@ -1,5 +1,16 @@
 {
-  "last_processed": "",
-  "processed_files": [],
-  "last_update": null
+  "last_processed": "yellow_tripdata_2025-02.parquet",
+  "processed_files": [
+    {
+      "filename": "yellow_tripdata_2025-01.parquet",
+      "row_count": 3475226,
+      "processed_at": "2026-03-08T22:09:13.437892"
+    },
+    {
+      "filename": "yellow_tripdata_2025-02.parquet",
+      "row_count": 3577543,
+      "processed_at": "2026-03-08T22:09:53.958727"
+    }
+  ],
+  "last_update": "2026-03-08T22:09:53.959750"
 }
