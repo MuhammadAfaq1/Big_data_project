@@ -15,10 +15,27 @@ The pipeline implements the following logic for correctness:
     - `LocationID (1-263)`: Ensures location IDs exist in the NYC taxi zone lookup.
 - **Deduplication**: Records are deduplicated using a composite key: `(VendorID, tpep_pickup_datetime, PULocationID, DOLocationID)`.
 
-### Examples of "Bad Rows" Handling
-1. **Row with zero passengers**: A record with `passenger_count = 0` is filtered out as invalid travel data.
-2. **Out-of-range Location ID**: A record with `PULocationID = 300` (outside the 1-263 range) is filtered out to maintain data integrity with the zone lookup table.
-3. **Duplicate Entry**: If two records have the same Vendor, Pickup Time, and Locations, only one is kept to ensure the output remains unique per event.
+### Custom Scenario: Impossible Trips Filter
+To demonstrate scenario-based data quality, a custom transformation removes *physically impossible* trips:
+
+- **Negative total amount**: `total_amount < 0`
+- **Unrealistic speed**: average speed \( \text{mph} = \frac{\text{trip\_distance}}{\text{trip\_duration\_hours}} \) greater than `100 mph`
+
+This logic is implemented in:
+- Spark path: `filter_impossible_trips` function in `src/transformations.py`
+- Pandas fallback: mirrored logic in `src/main.py`
+
+#### Examples of "Bad Rows" Handling
+
+| Example ID | Description                                      | Sample Fields                                                                 | Reason filtered                          |
+|-----------:|--------------------------------------------------|-------------------------------------------------------------------------------|------------------------------------------|
+| 1          | Zero passengers                                  | `passenger_count = 0`, `trip_distance = 1.2`                                 | Fails `passenger_count > 0`              |
+| 2          | Out-of-range pickup location                     | `PULocationID = 300`, `DOLocationID = 10`                                    | `PULocationID` not in \[1, 263]          |
+| 3          | Duplicate trip                                   | Same `VendorID`, `tpep_pickup_datetime`, `PULocationID`, `DOLocationID`      | Removed by deduplication key             |
+| 4          | Negative total amount (impossible trip)          | `trip_distance = 2.1`, `total_amount = -5.00`                                | Fails `total_amount >= 0`                |
+| 5          | Unrealistic speed (> 100 mph, impossible trip)   | `trip_distance = 120`, duration `0.5` hours (approx. 30 minutes)            | Implied speed `> 100 mph`                |
+
+For convenience, a short **Correctness Report** with concrete example rows is available in `reports/correctness_report.md`.
 
 ## 2. Performance
 ### Optimization Choices

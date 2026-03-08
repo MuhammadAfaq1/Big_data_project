@@ -56,7 +56,7 @@ def main():
     try:
         from pyspark.sql import SparkSession
         from pyspark.sql.functions import lit, current_timestamp
-        from transformations import clean_and_deduplicate
+        from transformations import clean_and_deduplicate, filter_impossible_trips
         from enrichment import enrich_with_zones
 
         spark = SparkSession.builder \
@@ -76,6 +76,7 @@ def main():
             input_count = raw_df.count()
             
             cleaned_df = clean_and_deduplicate(raw_df)
+            cleaned_df = filter_impossible_trips(cleaned_df)
             enriched_df = cleaned_df.withColumn("source_file", lit(file_path.name)) \
                                     .withColumn("ingested_at", current_timestamp())
             final_df = enrich_with_zones(enriched_df, zones_df)
@@ -92,6 +93,7 @@ def main():
         print(" ! Reverting to Pandas/PyArrow implementation for local Windows compatibility...")
         
         import pandas as pd
+        import numpy as np
         # Reload manifest in case some files were already processed by Spark before the crash
         manifest = load_manifest()
         processed_set = set(f["filename"] for f in manifest["processed_files"])
@@ -114,6 +116,20 @@ def main():
             pdf = pdf[(pdf['PULocationID'] >= 1) & (pdf['PULocationID'] <= 263)]
             pdf = pdf[(pdf['DOLocationID'] >= 1) & (pdf['DOLocationID'] <= 263)]
             pdf = pdf.drop_duplicates(subset=["VendorID", "tpep_pickup_datetime", "PULocationID", "DOLocationID"])
+
+            # Impossible trip filtering (Pandas mirror of Spark logic)
+            pdf['tpep_pickup_datetime'] = pd.to_datetime(pdf['tpep_pickup_datetime'])
+            pdf['tpep_dropoff_datetime'] = pd.to_datetime(pdf['tpep_dropoff_datetime'])
+            duration_hours = (pdf['tpep_dropoff_datetime'] - pdf['tpep_pickup_datetime']).dt.total_seconds() / 3600.0
+            pdf['__trip_duration_hours'] = duration_hours
+
+            valid_duration_mask = pdf['__trip_duration_hours'] > 0
+            # Avoid division-by-zero / NaN issues by using where with np.inf
+            speed_mph = pdf['trip_distance'] / pdf['__trip_duration_hours'].where(valid_duration_mask, np.nan)
+
+            mask_total_amount = pdf['total_amount'] >= 0
+            mask_speed = (~valid_duration_mask) | (speed_mph <= 100)
+            pdf = pdf[mask_total_amount & mask_speed].drop(columns=['__trip_duration_hours'])
             
             pdf = pdf.merge(zones_pdf[['LocationID', 'Zone']].rename(columns={'LocationID': 'PULocationID', 'Zone': 'pickup_zone'}), on='PULocationID', how='left')
             pdf = pdf.merge(zones_pdf[['LocationID', 'Zone']].rename(columns={'LocationID': 'DOLocationID', 'Zone': 'dropoff_zone'}), on='DOLocationID', how='left')
