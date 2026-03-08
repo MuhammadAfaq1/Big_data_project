@@ -3,7 +3,7 @@ Entry point for the incremental Spark ETL job for NYC Taxi data
 """
 import os
 from pathlib import Path
-from utils import load_manifest, save_manifest, get_new_files, update_manifest
+from utils import load_manifest, save_manifest, get_new_files, update_manifest, validate_file_schema, log_validation_error
 
 # Constants
 INBOX_DIR = Path(__file__).parent.parent / "data" / "inbox"
@@ -73,6 +73,14 @@ def main():
         for file_path in new_files:
             print(f"Processing {file_path.name} (Spark)...")
             raw_df = spark.read.parquet(str(file_path))
+            
+            # Validation Step
+            is_valid, reason = validate_file_schema(raw_df, is_spark=True)
+            if not is_valid:
+                print(f" ! Validation failed for {file_path.name}: {reason}")
+                log_validation_error(file_path.name, reason)
+                continue
+
             input_count = raw_df.count()
             
             cleaned_df = clean_and_deduplicate(raw_df)
@@ -106,6 +114,14 @@ def main():
         for file_path in files_to_process:
             print(f"Processing {file_path.name} (Pandas Fallback)...")
             pdf = pd.read_parquet(str(file_path))
+            
+            # Validation Step
+            is_valid, reason = validate_file_schema(pdf, is_spark=False)
+            if not is_valid:
+                print(f" ! Validation failed for {file_path.name}: {reason}")
+                log_validation_error(file_path.name, reason)
+                continue
+
             input_count = len(pdf)
             
             # Mirror logic
